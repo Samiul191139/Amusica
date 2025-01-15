@@ -22,7 +22,6 @@ bot = commands.Bot(command_prefix="/", intents=intents)
 server_config = {}
 queues = {}  # Dictionary to store song queues for each guild
 
-
 def load_config():
     """Load configurations from a JSON file."""
     global server_config
@@ -30,21 +29,17 @@ def load_config():
         with open(CONFIG_FILE, "r") as f:
             server_config = json.load(f)
 
-
 def save_config():
     """Save current configurations to a JSON file."""
     with open(CONFIG_FILE, "w") as f:
         json.dump(server_config, f, indent=4)
 
-
 load_config()
-
 
 @bot.event
 async def on_ready():
     print(f'The Music Bot is ready! Logged in as {bot.user}')
     await bot.tree.sync()  # Sync the slash commands globally
-
 
 @bot.event
 async def on_guild_join(guild):
@@ -62,28 +57,36 @@ async def on_guild_join(guild):
     else:
         print(f"Could not send setup instructions to {guild.name} - no accessible channels.")
 
-
 # Helper function to join a voice channel
 async def handle_join(interaction: discord.Interaction):
     """Helper function to handle bot joining a voice channel."""
-    if interaction.user.voice:
-        channel = interaction.user.voice.channel  # Use interaction.user to get the author
+    user_voice_state = interaction.user.voice  # Check the voice state of the user
+    print(f"User voice state: {user_voice_state}")  # Debugging info
+    if user_voice_state and user_voice_state.channel:
+        channel = user_voice_state.channel  # Use the channel the user is in
+        print(f"User is in voice channel: {channel.name}")  # Debugging info
         if interaction.guild.voice_client is None:
-            await channel.connect()
-            await interaction.response.send_message(f"Joined {channel.name}!")
+            try:
+                await channel.connect()
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(f"Joined {channel.name}!")
+            except Exception as e:
+                print(f"Error joining voice channel: {e}")  # Debugging info
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(f"Failed to join the voice channel: {e}")
         else:
             await interaction.guild.voice_client.move_to(channel)
-            await interaction.response.send_message(f"Moved to {channel.name}!")
+            if not interaction.response.is_done():
+                await interaction.response.send_message(f"Moved to {channel.name}!")
     else:
-        await interaction.response.send_message("You must be in a voice channel to use this command.")
-
+        if not interaction.response.is_done():
+            await interaction.response.send_message("You must be in a voice channel to use this command.")
 
 # Command to make the bot join a voice channel
 @bot.tree.command(name="join")
 async def join(interaction: discord.Interaction):
     """Command to make the bot join a voice channel."""
     await handle_join(interaction)
-
 
 # Command to make the bot leave a voice channel
 @bot.tree.command(name="leave")
@@ -95,7 +98,6 @@ async def leave(interaction: discord.Interaction):
     else:
         await interaction.response.send_message("I'm not in a voice channel!")
 
-
 # Command to play music
 @bot.tree.command(name="play")
 @app_commands.describe(query="The song or video to play.")
@@ -105,7 +107,8 @@ async def play(interaction: discord.Interaction, query: str):
         await handle_join(interaction)
 
     if interaction.guild.voice_client is None:
-        await interaction.response.send_message("I couldn't join the voice channel. Please try again.")
+        if not interaction.response.is_done():
+            await interaction.response.send_message("I couldn't join the voice channel. Please try again.")
         return
 
     guild_id = interaction.guild.id
@@ -122,20 +125,22 @@ async def play(interaction: discord.Interaction, query: str):
 
         # Add the song to the queue
         queues[guild_id].append((title, url))
-        await interaction.response.send_message(f"Added to the queue: **{title}**")
+        if not interaction.response.is_done():
+            await interaction.response.send_message(f"Added to the queue: **{title}**")
 
         # If nothing is playing, start playback
         if not interaction.guild.voice_client.is_playing():
             await play_next_song(interaction)
     except Exception as e:
-        await interaction.response.send_message(f"An error occurred while processing the song: {str(e)}")
-
+        if not interaction.response.is_done():
+            await interaction.response.send_message(f"An error occurred while processing the song: {str(e)}")
 
 async def play_next_song(interaction: discord.Interaction):
     """Play the next song in the queue."""
     guild_id = interaction.guild.id
     if guild_id not in queues or not queues[guild_id]:
-        await interaction.response.send_message("The queue is empty. Add more songs to play!")
+        if not interaction.response.is_done():
+            await interaction.followup.send("The queue is empty. Add more songs to play!")
         return
 
     title, url = queues[guild_id][0]  # Get the first song
@@ -146,8 +151,8 @@ async def play_next_song(interaction: discord.Interaction):
     audio_source = discord.FFmpegPCMAudio(url, options=ffmpeg_options)
     interaction.guild.voice_client.play(audio_source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next_song(interaction), bot.loop))
 
-    await interaction.response.send_message(f"Now playing: **{title}**")
-
+    if not interaction.response.is_done():
+        await interaction.followup.send(f"Now playing: **{title}**")
 
 # Command to skip the current song
 @bot.tree.command(name="skip")
@@ -160,7 +165,6 @@ async def skip(interaction: discord.Interaction):
     else:
         await interaction.response.send_message("No song is currently playing.")
 
-
 # Command to show the queue
 @bot.tree.command(name="queue")
 async def queue(interaction: discord.Interaction):
@@ -172,6 +176,5 @@ async def queue(interaction: discord.Interaction):
 
     queue_text = "\n".join([f"{i + 1}. {title}" for i, (title, _) in enumerate(queues[guild_id])])
     await interaction.response.send_message(f"**Current Queue:**\n{queue_text}")
-
 
 bot.run(DISCORD_TOKEN)
